@@ -138,3 +138,16 @@ never leaves the machine.
   appropriate than a personal credential that silently expires.
 - **Secrets are not managed.** The password lives in a local tfvars file; a real
   setup would source it from Vault, SOPS or a cloud secret manager.
+
+## CustomResourceDefinitions on destroy
+
+Helm does not remove CustomResourceDefinitions on uninstall, so
+`terraform destroy` leaves the `monitoring.coreos.com` CRDs behind. This is
+intentional on Helm's side — CRDs are cluster-scoped, and deleting them would
+destroy every object of those kinds across the whole cluster, including any
+owned by other releases.
+
+The practical consequences: `destroy` does not return the cluster to a truly
+clean state, and a redeploy reuses the existing CRDs rather than recreating
+them. A chart upgrade that changes CRD schemas therefore needs them applied
+separately — `helm upgrade` will not do it.
