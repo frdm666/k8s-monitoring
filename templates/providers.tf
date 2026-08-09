@@ -15,10 +15,10 @@ terraform {
 
 provider "helm" {
   kubernetes {
-    config_path = var.kubeconfig_path
+    config_path = "/root/.kube/lab-cluster.yaml"
   }
 }
 
 provider "kubernetes" {
-  config_path = var.kubeconfig_path
+  config_path = "/root/.kube/lab-cluster.yaml"
 }

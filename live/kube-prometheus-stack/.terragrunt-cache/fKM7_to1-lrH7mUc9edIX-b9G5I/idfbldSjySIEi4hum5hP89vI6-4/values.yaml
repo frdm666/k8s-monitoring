@@ -1,0 +1,71 @@
+# k3s packs scheduler, controller-manager and etcd into a single
+# binary, so they expose no separate metrics endpoints.
+# Leaving these enabled would produce permanently DOWN targets.
+kubeControllerManager:
+  enabled: false
+kubeScheduler:
+  enabled: false
+kubeEtcd:
+  enabled: false
+kubeProxy:
+  enabled: false
+
+# Disabled to save ~200Mi on 4GB nodes.
+# Alerting is out of scope for this task.
+alertmanager:
+  enabled: false
+
+prometheus:
+  prometheusSpec:
+    # Short retention: no persistent volume and limited disk space.
+    retention: 3d
+    retentionSize: 4GB
+    resources:
+      requests:
+        cpu: 100m
+        memory: 512Mi
+      limits:
+        memory: 1Gi
+    # No PVC: metrics are lost when the pod is rescheduled.
+    # Acceptable for a lab, not for production.
+    storageSpec: {}
+
+grafana:
+  # Loki as a log datasource. Declared here rather than clicked in
+  # the UI so it survives a redeploy.
+  additionalDataSources:
+    - name: Loki
+      type: loki
+      url: http://loki:3100
+      access: proxy
+  # NodePort: cluster nodes have no floating IP and no ingress
+  # is configured for this cluster.
+  service:
+    type: NodePort
+    nodePort: 30300
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      memory: 256Mi
+  persistence:
+    enabled: false
+
+prometheusOperator:
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      memory: 256Mi
+
+# Node-level metrics (CPU, memory, disk, network).
+nodeExporter:
+  enabled: true
+
+# Metrics about Kubernetes objects: pod states, deployment
+# replicas, node conditions. This is what makes cluster
+# entities observable in Grafana.
+kubeStateMetrics:
+  enabled: true

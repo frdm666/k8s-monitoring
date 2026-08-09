@@ -31,11 +31,18 @@ prometheus:
     storageSpec: {}
 
 grafana:
+  # Loki as a log datasource. Declared here rather than clicked in
+  # the UI so it survives a redeploy.
+  additionalDataSources:
+    - name: Loki
+      type: loki
+      url: http://loki:3100
+      access: proxy
   # NodePort: cluster nodes have no floating IP and no ingress
   # is configured for this cluster.
   service:
     type: NodePort
-    nodePort: ${grafana_node_port}
+    nodePort: 30300
   resources:
     requests:
       cpu: 50m
