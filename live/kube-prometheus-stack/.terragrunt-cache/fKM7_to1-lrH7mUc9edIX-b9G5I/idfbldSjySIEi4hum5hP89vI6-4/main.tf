@@ -5,7 +5,14 @@ resource "helm_release" "this" {
   version    = var.chart_version
   namespace  = var.namespace
 
-  values = var.values_file == "" ? [] : [file(var.values_file)]
+  # When values_vars is empty the file is read as-is. Otherwise it is
+  # treated as a template, so non-secret values (chat IDs, hostnames)
+  # can be injected without hardcoding them in the repository.
+  values = var.values_file == "" ? [] : [
+    length(var.values_vars) > 0
+    ? templatefile(var.values_file, var.values_vars)
+    : file(var.values_file)
+  ]
 
   dynamic "set_sensitive" {
     for_each = var.sensitive_values

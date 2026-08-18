@@ -24,6 +24,12 @@ variable "values_file" {
   default     = ""
 }
 
+variable "values_vars" {
+  description = "Non-secret variables injected into the values template"
+  type        = map(string)
+  default     = {}
+}
+
 variable "sensitive_values" {
   description = "Values passed via set_sensitive, kept out of plan output"
   type        = map(string)
