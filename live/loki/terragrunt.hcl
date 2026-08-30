@@ -22,4 +22,10 @@ inputs = {
   chart_version = "7.2.0"
   namespace     = dependency.namespace.outputs.namespace_name
   values_file   = "${get_terragrunt_dir()}/values.yaml"
+  values_vars = {
+    minio_access_key = get_env("MINIO_ACCESS_KEY")
+  }
+  sensitive_values = {
+    "loki.storage.s3.secretAccessKey" = get_env("MINIO_SECRET_KEY")
+  }
 }
