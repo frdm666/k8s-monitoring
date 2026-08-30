@@ -226,3 +226,77 @@ management (Vault, SOPS, a cloud secret manager) is out of scope here.
   CRDs are cluster-scoped and deleting them would destroy every object of those
   kinds. It means `destroy` does not return the cluster to a clean state, and a
   chart upgrade changing CRD schemas needs them applied separately.
+
+## Object storage: MinIO
+
+Both Loki and Thanos need S3-compatible storage. There is no cloud object
+store available here, so MinIO runs inside the cluster and serves both.
+
+**Standalone, not distributed.** The MinIO chart defaults to a 16-replica
+distributed deployment requesting 16Gi of memory per pod. On 4Gi nodes
+none of those pods ever schedule. `mode: standalone` with one replica and
+explicit `resources` is the only thing that fits. This trades MinIO's own
+redundancy away — acceptable for a lab, not for production.
+
+**Pinned to k8s-3.** k8s-2 runs etcd, which is sensitive to disk write
+latency (measured earlier with fio when debugging the Rancher `raft:
+stopped` failure). An object store that grows continuously with logs and
+metrics on the same disk risks degrading the control plane. k8s-3 is a
+plain worker, so MinIO goes there.
+
+## Loki: filesystem to S3
+
+Loki previously stored chunks and index on a `local-path` PVC — a
+directory on whichever node the pod happened to run on. A reschedule
+meant losing log history.
+
+Moving to `storage.type: s3` decouples data from the node. Two details
+that are specific to MinIO rather than real S3:
+
+- `s3ForcePathStyle: true` is required. Without it the client builds
+  bucket-as-subdomain URLs (`loki.minio.minio.svc...`) the way AWS S3
+  expects, and those do not resolve inside the cluster.
+- `insecure: true` — MinIO is served over plain HTTP inside the cluster.
+  Fine for pod-to-pod traffic here; a real deployment would terminate TLS.
+
+The access key goes through `values_vars`, the secret key through
+`sensitive_values`. Neither ends up in the repository.
+
+## Thanos: long-term metric storage
+
+Prometheus keeps 3 days of metrics on local disk with no PVC. Thanos moves
+long-term storage off the pod entirely: the sidecar uploads completed
+blocks to the `thanos` bucket, Store Gateway serves them back, and Query
+merges live data from the sidecar with historical blocks so Grafana sees
+one continuous history.
+
+**Custom module instead of the Bitnami chart.** The Bitnami chart was the
+first attempt. It installs cleanly, but every pod lands in
+`ImagePullBackOff`: the chart references
+`docker.io/bitnami/thanos:0.39.2-debian-12-r2`, and that tag no longer
+exists — Bitnami removed most versioned tags from their public registry.
+Pinning an older chart version would only postpone the same failure, since
+the images themselves are gone.
+
+The module in `modules/thanos/` uses `quay.io/thanos/thanos`, published by
+the Thanos project itself. It is more code than a `values.yaml`, but it
+does not depend on a third party's image policy.
+
+**Constraints worth recording:**
+
+- `disableCompaction: true` on Prometheus is mandatory once the Compactor
+  runs. Two components compacting the same blocks corrupt them.
+- The Compactor runs exactly one replica for the same reason. This is a
+  hard constraint from Thanos, not a lab shortcut.
+- `thanosService.enabled: true` is needed in `kube-prometheus-stack`. It is
+  off by default, and without it the sidecar has no service to be
+  discovered through — Query logs `no such host` forever while looking for
+  `kube-prometheus-stack-thanos-discovery`.
+- Store Gateway sits behind a headless service because Query finds it via
+  SRV records (`dnssrv+`), which need per-pod addresses rather than one
+  virtual IP.
+
+**Retention and downsampling** are set on the Compactor: raw data 7 days,
+5-minute resolution 30 days, 1-hour resolution 90 days. A year-long graph
+does not need per-second points, and reading them would be needlessly
+expensive.
