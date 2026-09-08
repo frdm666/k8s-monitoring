@@ -180,19 +180,29 @@ prometheus:
     # No PVC: metrics are lost when the pod is rescheduled.
     # Acceptable for a lab, not for production.
     storageSpec: {}
-
+    disableCompaction: true
+    thanos:
+      objectStorageConfig:
+        existingSecret:
+          name: thanos-objstore
+          key: objstore.yml
+  thanosService:
+    enabled: true
 grafana:
   # NodePort: cluster nodes have no floating IP and no ingress
   # is configured for this cluster.
+  sidecar:
+    datasources:
+      url: http://thanos-query:9090
   service:
     type: NodePort
     nodePort: 30300
   resources:
     requests:
       cpu: 50m
-      memory: 128Mi
-    limits:
       memory: 256Mi
+    limits:
+      memory: 512Mi
   persistence:
     enabled: false
   # Loki as a log datasource. Declared here rather than clicked in
@@ -220,3 +230,13 @@ nodeExporter:
 # entities observable in Grafana.
 kubeStateMetrics:
   enabled: true
+# Subchart section: resources for kube-state-metrics itself.
+# Without them it lands in BestEffort and gets evicted first —
+# exactly when cluster-state metrics are needed most.
+kube-state-metrics:
+  resources:
+    requests:
+      cpu: 10m
+      memory: 64Mi
+    limits:
+      memory: 128Mi

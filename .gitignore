@@ -6,4 +6,5 @@ kubeconfig*
 .env
 state/
 .terragrunt-cache/
+*.tgz
 **/.terragrunt-cache/
