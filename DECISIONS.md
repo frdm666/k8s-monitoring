@@ -300,3 +300,83 @@ does not depend on a third party's image policy.
 5-minute resolution 30 days, 1-hour resolution 90 days. A year-long graph
 does not need per-second points, and reading them would be needlessly
 expensive.
+## Alerting
+
+Alertmanager is enabled and routes to a Telegram channel. Alert rules come
+from two sources: the chart's defaults, and a small custom group defined via
+`additionalPrometheusRulesMap`.
+
+### Secret handling
+
+The bot token lives in a Kubernetes Secret created by its own Terragrunt unit
+from the `TELEGRAM_BOT_TOKEN` environment variable. Alertmanager mounts the
+secret and reads the value with `bot_token_file`, so the token appears in no
+values file, no plan output and no git history. The chat ID is injected into
+the values template from `TELEGRAM_CHAT_ID` for the same reason — it is not
+strictly a secret, but a private channel should not be exposed in the
+repository.
+
+### Watchdog and the dead man's switch
+
+The chart ships a `Watchdog` alert that fires permanently by design. It is
+routed to a null receiver rather than to Telegram, where it would be constant
+noise.
+
+Its purpose is inverted alerting: an external system should watch for the
+signal and raise an alarm when it **stops** arriving. A monitoring stack that
+has died looks exactly like a monitoring stack with nothing to report, and
+this is the only way to tell the two apart. Forwarding Watchdog to an external
+service is not configured here and remains a known gap.
+
+### Noise reduction
+
+Several measures, in order of how much they matter:
+
+- Rule groups for components k3s does not run (etcd, scheduler,
+  controller-manager, kube-proxy) are disabled at the source
+- `CPUThrottlingHigh` is disabled: throttling is expected with the tight CPU
+  limits used here
+- `InfoInhibitor`, which exists only to suppress other alerts, goes to the
+  null receiver
+- An inhibit rule suppresses warnings for an instance that already has a
+  critical alert
+- `group_by` on alertname and severity, with a 45s `group_wait`, so a burst
+  arrives as one message rather than a wall
+
+### Custom rules and their `for` durations
+
+The chart's defaults use `for` durations of 10-15 minutes. That is correct for
+production — a brief blip should not page anyone — but makes verification
+impractical. The custom `lab.rules` group uses 2-5 minutes instead. This is a
+deliberate lab trade-off, not a recommendation.
+
+### A false positive, and what it taught
+
+`LabPodNotReady` initially fired for completed Helm install Jobs left over
+from cluster provisioning. Formally they were "not ready"; in practice they
+had finished successfully eight days earlier.
+
+Fixed with `unless on(namespace, pod) kube_pod_status_phase{phase="Succeeded"} == 1`.
+
+The general lesson: a rule that is technically correct can still be useless.
+Readiness is meaningless for Jobs, and any rule over pod state needs to
+exclude workloads that are supposed to terminate.
+
+### Testing alerts is harder than writing them
+
+Kubernetes actively resists being broken, which makes verification tricky:
+
+- Scaling a Deployment to zero does **not** produce `up == 0`. The pod
+  disappears, the endpoint disappears, and Prometheus drops the target
+  entirely — the metric is absent, not zero.
+- Replacing the image with a broken one does not help either: the rolling
+  update keeps the healthy pod running until the new one becomes ready, so
+  the endpoint stays valid.
+
+What worked was letting the failing pod coexist with the healthy one, which
+triggered the pod-level rules while `up` stayed at 1 for the service.
+
+The takeaway is architectural: rules built on `up` detect "the service is
+there but not responding". They do not detect "the service is gone". Those
+need object-level metrics from kube-state-metrics, which is also why
+kube-state-metrics cannot be the only thing you monitor with.
